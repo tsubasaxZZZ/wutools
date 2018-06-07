@@ -1,13 +1,17 @@
 package kb
 
 import (
+	"encoding/csv"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,14 +28,13 @@ type KB struct {
 	kbPackageInfos []KBPackageInfo
 }
 
-//type KBPackageInfos []KBPackageInfo
-
 type KBPackageInfo struct {
 	packageTitle string
 	downloadLink string
 	architecture string
 	fileName     string
 	language     string
+	fileSize     int64
 }
 
 const (
@@ -39,18 +42,77 @@ const (
 	downloadDialogURL = "https://www.catalog.update.microsoft.com/DownloadDialog.aspx"
 )
 
-/*
-func newKB(no int, title string, links []string) *KB {
-	kb := new(KB)
-	kb.no = no
-	kb.title = title
-	kb.links = &links
-	return kb
+// ExportMetadataToCSV : メタデータを CSV にエクスポートする
+func (kbList KBList) ExportMetadataToCSV() error {
+	file, err := os.Create("metadata.csv")
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	writer.Write([]string{"KB", "Title(NotImpl)", "PackageTitle", "Architecture", "Filename", "Language", "Filesize(bytes)", "Packagelink"})
+	for _, kb := range kbList.kbs {
+		for _, pkg := range kb.kbPackageInfos {
+			writer.Write([]string{strconv.Itoa(kb.no), kb.title, pkg.packageTitle, pkg.architecture, pkg.fileName, pkg.language, strconv.FormatInt(pkg.fileSize, 10), pkg.downloadLink})
+		}
+	}
+	writer.Flush()
+	return nil
 }
-*/
 
 // DownloadAllKB : ファイルのダウンロード
-func (kbList *KBList) DownloadAllKB() error {
+func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
+	ch := make(chan KB, len(kbList.kbs))
+	wg := &sync.WaitGroup{}
+	semaphore := make(chan int, maxConcurrent)
+
+	for _, kb := range kbList.kbs {
+		wg.Add(1)
+		go func(kb KB, ch chan KB) {
+			log.Printf("--------------- start download all package : kb=[%d]", kb.no)
+			defer wg.Done()
+			for _, kbPackageInfo := range kb.kbPackageInfos {
+				semaphore <- 1
+				// ファイルの存在チェック
+				// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
+				if _, err := os.Stat(kbPackageInfo.fileName); err == nil {
+					log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+					<-semaphore
+					continue
+				}
+
+				log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+				resp, err := http.Get(kbPackageInfo.downloadLink)
+				if err != nil {
+					log.Fatal(err)
+					<-semaphore
+					continue
+				}
+				defer resp.Body.Close()
+				file, err := os.Create(kbPackageInfo.fileName)
+				if err != nil {
+					log.Fatal(err)
+					<-semaphore
+					continue
+				}
+				defer file.Close()
+
+				io.Copy(file, resp.Body)
+				log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+				<-semaphore
+			}
+			log.Printf("end download KB : kb=[%d]", kb.no)
+			ch <- kb
+		}(kb, ch)
+	}
+	//wg.Wait()
+	//close(ch)
+	for range kbList.kbs {
+		log.Printf("--------------- end download all package : kb=[%d]", (<-ch).no)
+	}
+	close(ch)
 	return nil
 }
 
@@ -94,7 +156,6 @@ func buildKB(no int, ch chan KB) {
 		func(_ int, s *goquery.Selection) {
 			kbPackageInfo := KBPackageInfo{}
 
-			//url, _ := s.Attr("href")
 			onclick, ok := s.Attr("onclick")
 			if ok && strings.Contains(onclick, "goToDetails") {
 				// goToDetails の ID 部分だけ取得
@@ -131,7 +192,7 @@ func buildKB(no int, ch chan KB) {
 				}
 
 				//----------------------------------
-				// scraiping for dialog
+				// scraiping for download dialog
 				//----------------------------------
 				body, _ := ioutil.ReadAll(resp.Body)
 				dialogBodyDoc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
@@ -151,11 +212,15 @@ func buildKB(no int, ch chan KB) {
 				kbPackageInfo.architecture = m["architectures"]
 				kbPackageInfo.fileName = m["fileName"]
 				kbPackageInfo.language = m["longLanguages"]
-
+				// ファイルサイズの取得(HEAD)
+				res, err := http.Head(kbPackageInfo.downloadLink)
+				if err != nil {
+					log.Fatal("HEAD file error")
+				}
+				kbPackageInfo.fileSize = res.ContentLength
 				kb.kbPackageInfos = append(kb.kbPackageInfos, kbPackageInfo)
 			}
 
 		})
-	//log.Println(kb.kbPackageInfos)
 	ch <- *kb
 }
