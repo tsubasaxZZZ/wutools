@@ -14,6 +14,7 @@ var (
 	kbnoOpt     = flag.String("n", "", "Specific KB NO(if you want to multiple, separate comma)")
 	csvOpt      = flag.String("f", "", "Specific CSV file")
 	metaonlyOpt = flag.Bool("metadata-only", false, "If you want to get only metadata, specific this option")
+	conOpt      = flag.Int("c", 10, "Specific max downloadconcurrent num(default:10)")
 )
 
 func main() {
@@ -40,6 +41,6 @@ func main() {
 	log.Println(*kbList)
 	kbList.ExportMetadataToCSV()
 	if !*metaonlyOpt {
-		kbList.DownloadAllKB(10)
+		kbList.DownloadAllKB(*conOpt)
 	}
 }
