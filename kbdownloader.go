@@ -18,6 +18,7 @@ var (
 )
 
 func main() {
+	// 引数のパース
 	flag.Parse()
 
 	if *kbnoOpt == "" {
@@ -36,10 +37,15 @@ func main() {
 	}
 	log.Printf("Target KB no:%v", kbno)
 
-	kbList := kb.NewKBList(kbno)
+	// KB のリストの生成
+	kbList := kb.NewKBList(kbno, *conOpt)
 
 	log.Println(*kbList)
+
+	// CSV へメタデータを出力
 	kbList.ExportMetadataToCSV()
+
+	// メタデータのみ取得のオプションがない場合にパッケージをダウンロード
 	if !*metaonlyOpt {
 		kbList.DownloadAllKB(*conOpt)
 	}

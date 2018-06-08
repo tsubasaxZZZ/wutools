@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,13 +22,13 @@ type KBList struct {
 }
 
 type KB struct {
-	no             int
-	title          string
-	kbPackageInfos []KBPackageInfo
+	no           int
+	title        string
+	packageInfos []PackageInfo
 }
 
-type KBPackageInfo struct {
-	packageTitle string
+type PackageInfo struct {
+	title        string
 	downloadLink string
 	architecture string
 	fileName     string
@@ -54,8 +53,8 @@ func (kbList KBList) ExportMetadataToCSV() error {
 	writer := csv.NewWriter(file)
 	writer.Write([]string{"KB", "Title(NotImpl)", "PackageTitle", "Architecture", "Filename", "Language", "Filesize(bytes)", "Packagelink"})
 	for _, kb := range kbList.kbs {
-		for _, pkg := range kb.kbPackageInfos {
-			writer.Write([]string{strconv.Itoa(kb.no), kb.title, pkg.packageTitle, pkg.architecture, pkg.fileName, pkg.language, strconv.FormatInt(pkg.fileSize, 10), pkg.downloadLink})
+		for _, pkg := range kb.packageInfos {
+			writer.Write([]string{strconv.Itoa(kb.no), kb.title, pkg.title, pkg.architecture, pkg.fileName, pkg.language, strconv.FormatInt(pkg.fileSize, 10), pkg.downloadLink})
 		}
 	}
 	writer.Flush()
@@ -73,7 +72,7 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 		go func(kb KB, ch chan KB) {
 			log.Printf("--------------- start download all package : kb=[%d]", kb.no)
 			defer wg.Done()
-			for _, kbPackageInfo := range kb.kbPackageInfos {
+			for _, kbPackageInfo := range kb.packageInfos {
 				semaphore <- 1
 				// ファイルの存在チェック
 				// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
@@ -117,15 +116,12 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 }
 
 // NewKBList : KB番号から、URLやタイトルのリストを生成する
-func NewKBList(nos []int) *KBList {
+func NewKBList(nos []int, maxConcurrent int) *KBList {
 	kbList := new(KBList)
 	ch := make(chan KB, len(nos))
 
 	wg := &sync.WaitGroup{}
-	// CPU 数で最大のスレッド数を制限
-	cpus := runtime.NumCPU()
-	runtime.GOMAXPROCS(cpus)
-	semaphore := make(chan int, cpus)
+	semaphore := make(chan int, maxConcurrent)
 	for _, no := range nos {
 		wg.Add(1)
 		go func(no int, ch chan KB) {
@@ -154,7 +150,7 @@ func buildKB(no int, ch chan KB) {
 	//<a id="ef673d9c-0e61-412b-be87-9eba39fe13dd_link" href="javascript:void(0);" onclick="goToDetails(";ef673d9c-0e61-412b-be87-9eba39fe13dd");">
 	doc.Find("tbody > tr > td > a").Each(
 		func(_ int, s *goquery.Selection) {
-			kbPackageInfo := KBPackageInfo{}
+			packageInfo := PackageInfo{}
 
 			onclick, ok := s.Attr("onclick")
 			if ok && strings.Contains(onclick, "goToDetails") {
@@ -164,8 +160,8 @@ func buildKB(no int, ch chan KB) {
 					"",
 					-1,
 				)
-				kbPackageInfo.packageTitle = strings.TrimSpace(s.Text())
-				log.Printf("Get Package title and Id:packageTitle=[%s], onclick=[%s], updateID=[%s]", kbPackageInfo.packageTitle, onclick, updateID)
+				packageInfo.title = strings.TrimSpace(s.Text())
+				log.Printf("Get Package title and Id:packageTitle=[%s], onclick=[%s], updateID=[%s]", packageInfo.title, onclick, updateID)
 
 				//----------------------------------
 				// scraiping package download link
@@ -208,17 +204,17 @@ func buildKB(no int, ch chan KB) {
 				log.Printf("Get file information: m=%s", m)
 				defer resp.Body.Close()
 
-				kbPackageInfo.downloadLink = m["url"]
-				kbPackageInfo.architecture = m["architectures"]
-				kbPackageInfo.fileName = m["fileName"]
-				kbPackageInfo.language = m["longLanguages"]
+				packageInfo.downloadLink = m["url"]
+				packageInfo.architecture = m["architectures"]
+				packageInfo.fileName = m["fileName"]
+				packageInfo.language = m["longLanguages"]
 				// ファイルサイズの取得(HEAD)
-				res, err := http.Head(kbPackageInfo.downloadLink)
+				res, err := http.Head(packageInfo.downloadLink)
 				if err != nil {
 					log.Fatal("HEAD file error")
 				}
-				kbPackageInfo.fileSize = res.ContentLength
-				kb.kbPackageInfos = append(kb.kbPackageInfos, kbPackageInfo)
+				packageInfo.fileSize = res.ContentLength
+				kb.packageInfos = append(kb.packageInfos, packageInfo)
 			}
 
 		})
