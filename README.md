@@ -1,3 +1,6 @@
+## Summary
+Download KB packages from Windows Update Catalog.
+
 ## Usage
 ```
   -c int
