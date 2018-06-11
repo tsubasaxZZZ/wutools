@@ -34,6 +34,7 @@ type PackageInfo struct {
 	fileName     string
 	language     string
 	fileSize     int64
+	staus        chan int
 }
 
 const (
@@ -69,38 +70,41 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 
 	for _, kb := range kbList.kbs {
 		wg.Add(1)
+		// 同一KBでファイル重複があるため、KB単位でgoroutine
 		go func(kb KB, ch chan KB) {
 			log.Printf("--------------- start download all package : kb=[%d]", kb.no)
 			defer wg.Done()
 			for _, kbPackageInfo := range kb.packageInfos {
-				semaphore <- 1
-				// ファイルの存在チェック
-				// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
-				if _, err := os.Stat(kbPackageInfo.fileName); err == nil {
-					log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
-					<-semaphore
-					continue
+				err := func() error {
+					semaphore <- 1
+					defer func() { <-semaphore }()
+					// ファイルの存在チェック
+					// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
+					if _, err := os.Stat(kbPackageInfo.fileName); err == nil {
+						log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+						return err
+					}
+
+					log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+					resp, err := http.Get(kbPackageInfo.downloadLink)
+					if err != nil {
+						return err
+					}
+					defer resp.Body.Close()
+					file, err := os.Create(kbPackageInfo.fileName)
+					if err != nil {
+						return err
+					}
+					defer file.Close()
+
+					io.Copy(file, resp.Body)
+					log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+					return nil
+				}()
+				if err != nil {
+					log.Print(err)
 				}
 
-				log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
-				resp, err := http.Get(kbPackageInfo.downloadLink)
-				if err != nil {
-					log.Fatal(err)
-					<-semaphore
-					continue
-				}
-				defer resp.Body.Close()
-				file, err := os.Create(kbPackageInfo.fileName)
-				if err != nil {
-					log.Fatal(err)
-					<-semaphore
-					continue
-				}
-				defer file.Close()
-
-				io.Copy(file, resp.Body)
-				log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
-				<-semaphore
 			}
 			log.Printf("end download KB : kb=[%d]", kb.no)
 			ch <- kb
@@ -108,9 +112,16 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 	}
 	//wg.Wait()
 	//close(ch)
+
 	for range kbList.kbs {
+		/*
+			for _, p := range k.packageInfos {
+				log.Print(<-p.staus)
+			}
+		*/
 		log.Printf("--------------- end download all package : kb=[%d]", (<-ch).no)
 	}
+
 	close(ch)
 	return nil
 }
@@ -143,7 +154,8 @@ func buildKB(no int, ch chan KB) {
 
 	doc, err := goquery.NewDocument(fmt.Sprintf(catalogURL, kb.no))
 	if err != nil {
-		log.Fatal("url scarapping failed")
+		log.Print(err)
+		return
 	}
 
 	//抜き出してくる文字列:
@@ -175,7 +187,8 @@ func buildKB(no int, ch chan KB) {
 					strings.NewReader(data.Encode()),
 				)
 				if err != nil {
-					log.Fatal(err)
+					log.Print(err)
+					return
 				}
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -184,7 +197,8 @@ func buildKB(no int, ch chan KB) {
 				// Response
 				resp, err := client.Do(req)
 				if err != nil {
-					log.Fatal(err)
+					log.Print(err)
+					return
 				}
 
 				//----------------------------------
@@ -193,7 +207,8 @@ func buildKB(no int, ch chan KB) {
 				body, _ := ioutil.ReadAll(resp.Body)
 				dialogBodyDoc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 				if err != nil {
-					log.Fatal("url scarapping failed")
+					log.Print(err)
+					return
 				}
 				html, _ := dialogBodyDoc.Html()
 				r := regexp.MustCompile(`downloadInformation\[0\]\.files\[0\]\.(\S+) = '(\S+)';`)
@@ -203,17 +218,17 @@ func buildKB(no int, ch chan KB) {
 				}
 				log.Printf("Get file information: m=%s", m)
 				defer resp.Body.Close()
-
+				// ファイルサイズの取得(HEAD)
+				res, err := http.Head(m["url"])
+				if err != nil {
+					log.Print(err)
+					return
+				}
+				packageInfo.fileSize = res.ContentLength
 				packageInfo.downloadLink = m["url"]
 				packageInfo.architecture = m["architectures"]
 				packageInfo.fileName = m["fileName"]
 				packageInfo.language = m["longLanguages"]
-				// ファイルサイズの取得(HEAD)
-				res, err := http.Head(packageInfo.downloadLink)
-				if err != nil {
-					log.Fatal("HEAD file error")
-				}
-				packageInfo.fileSize = res.ContentLength
 				kb.packageInfos = append(kb.packageInfos, packageInfo)
 			}
 
