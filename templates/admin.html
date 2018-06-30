@@ -1,0 +1,53 @@
+{% extends 'layouts/master.html' %}
+{% block title %}{% endblock %}
+{% block body %}
+
+<table class="table" style="padding: 10px;">
+    <thead class="thead">
+        <tr>
+            <th scope="col">
+                KB no
+            </th>
+            <th scope="col">
+                KB title
+            </th>
+            <th scope="col">
+                Status
+            </th>
+        </tr>
+    </thead>
+    {% for kb in session %}
+    <tbody>
+        <tr class="clickable"  data-toggle="collapse" data-target="#group-of-rows-{{kb.kbno}}" aria-expanded="false" aria-controls="group-of-rows-{{kb.kbno}}">
+            <td>+{{kb.kbno}}</td>
+            <td>{{kb.title}}</td>
+            <td>{{kb.status}}</td>
+        </tr>
+    </tbody>
+    <tbody id="group-of-rows-{{kb.kbno}}" class="collapse">
+        <th>
+            <tr>
+                <td>Title</td>
+                <td>Filename</td>
+                <td>Filesize</td>
+                <td>DownloadLink</td>
+            </tr>
+        </th>
+        {%for p in kb.packages%}
+        <tr>
+            <td>{{p.title}}</td>
+            <td>{{p.fileName}}</td>
+            <td>{{p.fileSize}}</td>
+            <td>{{p.downloadLink}}</td>
+        </tr>    
+        {%endfor%}
+    </tbody>
+    {% endfor %}
+    </tbody>
+</table>
+
+<form style="padding: 10px;" action="{{url_for('export', uuid=id)}}" method="GET">
+    <button type="submit" class="btn btn-primary">Export to CSV</button>
+</form>
+
+{% endblock %}
