@@ -129,33 +129,28 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 // NewKBList : KB番号から、URLやタイトルのリストを生成する
 func NewKBList(nos []int, maxConcurrent int) *KBList {
 	kbList := new(KBList)
-	ch := make(chan KB, len(nos))
 
 	wg := &sync.WaitGroup{}
 	semaphore := make(chan int, maxConcurrent)
 	for _, no := range nos {
 		wg.Add(1)
-		go func(no int, ch chan KB) {
+		go func(no int) {
 			defer wg.Done()
 			semaphore <- 1
-			buildKB(no, ch)
+			kbList.kbs = append(kbList.kbs, *buildKB(no))
 			<-semaphore
-		}(no, ch)
+		}(no)
 	}
 	wg.Wait()
-	close(ch)
-	for kb := range ch {
-		kbList.kbs = append(kbList.kbs, kb)
-	}
 	return kbList
 }
-func buildKB(no int, ch chan KB) {
+func buildKB(no int) *KB {
 	kb := &KB{no: no}
 
 	doc, err := goquery.NewDocument(fmt.Sprintf(catalogURL, kb.no))
 	if err != nil {
 		log.Print(err)
-		return
+		return nil
 	}
 
 	//抜き出してくる文字列:
@@ -233,5 +228,5 @@ func buildKB(no int, ch chan KB) {
 			}
 
 		})
-	ch <- *kb
+	return (kb)
 }
