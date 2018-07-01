@@ -24,21 +24,22 @@ type KBList struct {
 type KB struct {
 	no           int
 	title        string
-	packageInfos []PackageInfo
+	PackageInfos []PackageInfo
 }
 
 type PackageInfo struct {
-	title        string
-	downloadLink string
-	architecture string
-	fileName     string
-	language     string
-	fileSize     int64
+	Title        string
+	DownloadLink string
+	Architecture string
+	FileName     string
+	Language     string
+	FileSize     int64
 	staus        chan int
 }
 
 const (
 	catalogURL        = "https://www.catalog.update.microsoft.com/Search.aspx?q=%d"
+	kbsiteURL         = "https://support.microsoft.com/en-us/help/%d"
 	downloadDialogURL = "https://www.catalog.update.microsoft.com/DownloadDialog.aspx"
 )
 
@@ -54,8 +55,8 @@ func (kbList KBList) ExportMetadataToCSV() error {
 	writer := csv.NewWriter(file)
 	writer.Write([]string{"KB", "Title(NotImpl)", "PackageTitle", "Architecture", "Filename", "Language", "Filesize(bytes)", "Packagelink"})
 	for _, kb := range kbList.kbs {
-		for _, pkg := range kb.packageInfos {
-			writer.Write([]string{strconv.Itoa(kb.no), kb.title, pkg.title, pkg.architecture, pkg.fileName, pkg.language, strconv.FormatInt(pkg.fileSize, 10), pkg.downloadLink})
+		for _, pkg := range kb.PackageInfos {
+			writer.Write([]string{strconv.Itoa(kb.no), kb.title, pkg.Title, pkg.Architecture, pkg.FileName, pkg.Language, strconv.FormatInt(pkg.FileSize, 10), pkg.DownloadLink})
 		}
 	}
 	writer.Flush()
@@ -74,31 +75,31 @@ func (kbList KBList) DownloadAllKB(maxConcurrent int) error {
 		go func(kb KB, ch chan KB) {
 			log.Printf("--------------- start download all package : kb=[%d]", kb.no)
 			defer wg.Done()
-			for _, kbPackageInfo := range kb.packageInfos {
+			for _, kbPackageInfo := range kb.PackageInfos {
 				err := func() error {
 					semaphore <- 1
 					defer func() { <-semaphore }()
 					// ファイルの存在チェック
 					// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
-					if _, err := os.Stat(kbPackageInfo.fileName); err == nil {
-						log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+					if _, err := os.Stat(kbPackageInfo.FileName); err == nil {
+						log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.FileName)
 						return err
 					}
 
-					log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
-					resp, err := http.Get(kbPackageInfo.downloadLink)
+					log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.FileName)
+					resp, err := http.Get(kbPackageInfo.DownloadLink)
 					if err != nil {
 						return err
 					}
 					defer resp.Body.Close()
-					file, err := os.Create(kbPackageInfo.fileName)
+					file, err := os.Create(kbPackageInfo.FileName)
 					if err != nil {
 						return err
 					}
 					defer file.Close()
 
 					io.Copy(file, resp.Body)
-					log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.fileName)
+					log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", kb.no, kbPackageInfo.FileName)
 					return nil
 				}()
 				if err != nil {
@@ -137,17 +138,24 @@ func NewKBList(nos []int, maxConcurrent int) *KBList {
 		go func(no int) {
 			defer wg.Done()
 			semaphore <- 1
-			kbList.kbs = append(kbList.kbs, *buildKB(no))
+			kbList.kbs = append(kbList.kbs, *BuildKBInfo(no))
 			<-semaphore
 		}(no)
 	}
 	wg.Wait()
 	return kbList
 }
-func buildKB(no int) *KB {
+func BuildKBInfo(no int) *KB {
 	kb := &KB{no: no}
 
-	doc, err := goquery.NewDocument(fmt.Sprintf(catalogURL, kb.no))
+	// -------------------------------------
+	// ToDo KB サイトからタイトル取得
+	// -------------------------------------
+
+	// -------------------------------------
+	// Windows Update カタログ
+	// -------------------------------------
+	catalogDoc, err := goquery.NewDocument(fmt.Sprintf(catalogURL, kb.no))
 	if err != nil {
 		log.Print(err)
 		return nil
@@ -155,7 +163,7 @@ func buildKB(no int) *KB {
 
 	//抜き出してくる文字列:
 	//<a id="ef673d9c-0e61-412b-be87-9eba39fe13dd_link" href="javascript:void(0);" onclick="goToDetails(";ef673d9c-0e61-412b-be87-9eba39fe13dd");">
-	doc.Find("tbody > tr > td > a").Each(
+	catalogDoc.Find("tbody > tr > td > a").Each(
 		func(_ int, s *goquery.Selection) {
 			packageInfo := PackageInfo{}
 
@@ -167,8 +175,8 @@ func buildKB(no int) *KB {
 					"",
 					-1,
 				)
-				packageInfo.title = strings.TrimSpace(s.Text())
-				log.Printf("Get Package title and Id:packageTitle=[%s], onclick=[%s], updateID=[%s]", packageInfo.title, onclick, updateID)
+				packageInfo.Title = strings.TrimSpace(s.Text())
+				log.Printf("Get Package title and Id:packageTitle=[%s], onclick=[%s], updateID=[%s]", packageInfo.Title, onclick, updateID)
 
 				//----------------------------------
 				// scraiping package download link
@@ -219,12 +227,12 @@ func buildKB(no int) *KB {
 					log.Print(err)
 					return
 				}
-				packageInfo.fileSize = res.ContentLength
-				packageInfo.downloadLink = m["url"]
-				packageInfo.architecture = m["architectures"]
-				packageInfo.fileName = m["fileName"]
-				packageInfo.language = m["longLanguages"]
-				kb.packageInfos = append(kb.packageInfos, packageInfo)
+				packageInfo.FileSize = res.ContentLength
+				packageInfo.DownloadLink = m["url"]
+				packageInfo.Architecture = m["architectures"]
+				packageInfo.FileName = m["fileName"]
+				packageInfo.Language = m["longLanguages"]
+				kb.PackageInfos = append(kb.PackageInfos, packageInfo)
 			}
 
 		})

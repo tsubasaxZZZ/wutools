@@ -1,12 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/go-ini/ini"
+
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/tsubasaxZZZ/wutools/common"
 )
 
@@ -15,12 +21,17 @@ var (
 	csvOpt      = flag.String("f", "", "(Not Implement)Specific CSV file")
 	metaonlyOpt = flag.Bool("metadata-only", false, "If you want to get only metadata, specific this option")
 	conOpt      = flag.Int("c", 10, "Specific max downloadconcurrent num(default:10)")
+	daemonOpt   = flag.Bool("d", false, "Daemon mode")
 )
 
 func main() {
 	// 引数のパース
 	flag.Parse()
 
+	if *daemonOpt {
+		daemonize()
+		return
+	}
 	if *kbnoOpt == "" {
 		fmt.Println("You need specific KB no.(Please read --help)")
 		return
@@ -48,5 +59,83 @@ func main() {
 	// メタデータのみ取得のオプションがない場合にパッケージをダウンロード
 	if !*metaonlyOpt {
 		kbList.DownloadAllKB(*conOpt)
+	}
+}
+
+func connectDB() (*sql.DB, error) {
+	// 設定ファイル読み込み
+	cfg, err := ini.Load("config.ini")
+	if err != nil {
+		fmt.Printf("Fail to read file: %v", err)
+		os.Exit(1)
+	}
+	//user:password@tcp(host:port)/dbname
+	connectionString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
+		cfg.Section("").Key("DATABASE_USERNAME").String(),
+		cfg.Section("").Key("DATABASE_PASSWORD").String(),
+		cfg.Section("").Key("DATABASE_SERVER").String(),
+		cfg.Section("").Key("DATABASE_PORT").String(),
+		cfg.Section("").Key("DATABASE_NAME").String(),
+	)
+	// DB 接続
+	log.Printf("Connect mysql: %s", connectionString)
+	db, err := sql.Open("mysql", connectionString)
+	return db, err
+
+}
+func daemonize() {
+	db, err := connectDB()
+	if err != nil {
+		panic(err.Error())
+	}
+	defer db.Close()
+	//無限ループ
+	for {
+		// session テーブルのクエリ
+		// 登録済み状態のもののみ取得
+		log.Println("Query session table.")
+		rows, err := db.Query(
+			"SELECT id,kbno,sakey,create_utc_date,update_utc_date,status FROM session WHERE `status` & ? = 1",
+			kb.StatusRegistered,
+		)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		defer rows.Close()
+
+		// 行スキャン
+		var sessions []kb.Session
+		log.Println("Start scan rows.")
+		for rows.Next() {
+			var session kb.Session
+			session.Db = db
+			err := rows.Scan(
+				&(session.ID),
+				&(session.Kbno),
+				&(session.Sakey),
+				&(session.CreateDate),
+				&(session.UpdateDate),
+				&(session.Status),
+			)
+			if err != nil {
+				log.Fatal(err.Error())
+			}
+			fmt.Println(session)
+			sessions = append(sessions, session)
+		}
+		if err := rows.Err(); err != nil {
+			log.Panic(err.Error())
+		}
+
+		// KB単位で処理開始
+		semaphore := make(chan int, 10)
+		for _, session := range sessions {
+			semaphore <- 1
+			fmt.Printf("------------------%s---------------------%d----------\n", session.ID.String, session.Kbno)
+			go session.ProcessSession()
+			<-semaphore
+		}
+
+		time.Sleep(10 * time.Second)
 	}
 }

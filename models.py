@@ -4,6 +4,17 @@ import datetime
 
 db = SQLAlchemy()
 
+#STATUSREGISTERED : 登録済み(開始前)
+STATUS_REGISTERED = 0X1
+#STATUSMETADATAINPROGRESS : メタデータ取得中
+STATUS_METADATAINPROGRESS = 0X2
+#STAUTSMETADATACOMPLETE : メタデータ取得完了
+STAUTS_METADATACOMPLETE = 0X4
+#STATUSDOWNLOADINPROGRESS : ダウンロード中
+STATUS_DOWNLOADINPROGRESS = 0X8
+#STATUSDOWNLOADCOMPLETE : ダウンロード完了
+STATUS_DOWNLOADCOMPLETE = 0X10
+
 class Session(db.Model):
     __tablename__ = 'session'
     id = db.Column(db.String(36), primary_key=True)

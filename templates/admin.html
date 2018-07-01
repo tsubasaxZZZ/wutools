@@ -34,12 +34,14 @@
             </tr>
         </th>
         {%for p in kb.packages%}
+        {% if p.kbno == kb.kbno %}
         <tr>
             <td>{{p.title}}</td>
             <td>{{p.fileName}}</td>
             <td>{{p.fileSize}}</td>
             <td>{{p.downloadLink}}</td>
-        </tr>    
+        </tr>
+        {%endif%}
         {%endfor%}
     </tbody>
     {% endfor %}
