@@ -34,7 +34,7 @@ type PackageInfo struct {
 	FileName     string
 	Language     string
 	FileSize     int64
-	staus        chan int
+	Staus        int
 }
 
 const (

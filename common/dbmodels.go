@@ -68,6 +68,7 @@ func (session Session) ProcessSession() {
 		)
 		if err != nil {
 			log.Printf("INSERT ERROR: id=[%s], kbno=[%d]", session.ID.String, session.Kbno)
+			// package のステータスをエラーに変更
 		}
 	}
 
@@ -82,6 +83,8 @@ func (session Session) ProcessSession() {
 	// ファイルのダウンロード
 	for _, kbPackageInfo := range kbinfo.PackageInfos {
 		err := func() error {
+			// packageのステータス変更
+
 			// ディレクトリが存在しない場合はディレクトリを作成
 
 			// ファイルの存在チェック
@@ -106,21 +109,23 @@ func (session Session) ProcessSession() {
 			io.Copy(file, resp.Body)
 			log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
 
-			// ハッシュの計算
-
-			// Storage Account へアップロード
-
-			// ハッシュの取得と比較
-
-			// ディレクトリの削除
 			return nil
 		}()
 		if err != nil {
 			log.Print(err)
 		}
+		// SA にアップロード
+
+		// ハッシュの計算
+
+		// Storage Account へアップロード
+
+		// ハッシュの取得と比較
+
+		// ディレクトリの削除
 
 	}
-	// SA にアップロード
+
 	// ステータスをダウンロード完了に変更
 	session.changeStatus(StatusDownloadComplete)
 
