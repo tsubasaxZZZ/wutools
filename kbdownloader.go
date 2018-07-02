@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -66,8 +65,7 @@ func connectDB() (*sql.DB, error) {
 	// 設定ファイル読み込み
 	cfg, err := ini.Load("config.ini")
 	if err != nil {
-		fmt.Printf("Fail to read file: %v", err)
-		os.Exit(1)
+		log.Fatalf("Fail to read file: %v", err)
 	}
 	//user:password@tcp(host:port)/dbname
 	connectionString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
@@ -120,7 +118,6 @@ func daemonize() {
 			if err != nil {
 				log.Fatal(err.Error())
 			}
-			fmt.Println(session)
 			sessions = append(sessions, session)
 		}
 		if err := rows.Err(); err != nil {
@@ -131,7 +128,6 @@ func daemonize() {
 		semaphore := make(chan int, 10)
 		for _, session := range sessions {
 			semaphore <- 1
-			fmt.Printf("------------------%s---------------------%d----------\n", session.ID.String, session.Kbno)
 			go session.ProcessSession()
 			<-semaphore
 		}

@@ -32,7 +32,7 @@ type Session struct {
 	Db         *sql.DB
 }
 
-func (session *Session) ChangeStatus(toStatus int) {
+func (session *Session) changeStatus(toStatus int) {
 
 	log.Printf("Change status: id=[%s], kbno=[%d], from-status=[%d], to-status=[%d]", session.ID.String, session.Kbno, session.Status, toStatus)
 	_, err := session.Db.Exec(
@@ -53,7 +53,7 @@ func (session Session) ProcessSession() {
 	log.Printf("Start process session: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
 
 	// ステータスをメタデータ取得中に変更
-	session.ChangeStatus(StatusMetadataInprogress)
+	session.changeStatus(StatusMetadataInprogress)
 
 	// KB 情報の取得
 	kbinfo := BuildKBInfo(session.Kbno)
@@ -72,16 +72,18 @@ func (session Session) ProcessSession() {
 	}
 
 	// ステータスをメタデータ取得完了に変更
-	session.ChangeStatus(StautsMetadataComplete)
+	session.changeStatus(StautsMetadataComplete)
 
 	//----------------------------
 	// SAキーがある場合ダウンロード
 	//----------------------------
 	// ステータスをダウンロード中に変更
-	session.ChangeStatus(StatusDownloadInprogress)
+	session.changeStatus(StatusDownloadInprogress)
 	// ファイルのダウンロード
 	for _, kbPackageInfo := range kbinfo.PackageInfos {
 		err := func() error {
+			// ディレクトリが存在しない場合はディレクトリを作成
+
 			// ファイルの存在チェック
 			// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
 			if _, err := os.Stat(kbPackageInfo.FileName); err == nil {
@@ -103,6 +105,14 @@ func (session Session) ProcessSession() {
 
 			io.Copy(file, resp.Body)
 			log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
+
+			// ハッシュの計算
+
+			// Storage Account へアップロード
+
+			// ハッシュの取得と比較
+
+			// ディレクトリの削除
 			return nil
 		}()
 		if err != nil {
@@ -112,7 +122,7 @@ func (session Session) ProcessSession() {
 	}
 	// SA にアップロード
 	// ステータスをダウンロード完了に変更
-	session.ChangeStatus(StatusDownloadComplete)
+	session.changeStatus(StatusDownloadComplete)
 
 	// 処理終了
 	log.Printf("End process session: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
