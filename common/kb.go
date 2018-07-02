@@ -24,7 +24,7 @@ type KBList struct {
 type KB struct {
 	no           int
 	title        string
-	PackageInfos []PackageInfo
+	PackageInfos []*PackageInfo
 }
 
 type PackageInfo struct {
@@ -34,7 +34,8 @@ type PackageInfo struct {
 	FileName     string
 	Language     string
 	FileSize     int64
-	Staus        int
+	Status       int
+	MD5hash      string
 }
 
 const (
@@ -232,7 +233,7 @@ func BuildKBInfo(no int) *KB {
 				packageInfo.Architecture = m["architectures"]
 				packageInfo.FileName = m["fileName"]
 				packageInfo.Language = m["longLanguages"]
-				kb.PackageInfos = append(kb.PackageInfos, packageInfo)
+				kb.PackageInfos = append(kb.PackageInfos, &packageInfo)
 			}
 
 		})

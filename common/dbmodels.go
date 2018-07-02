@@ -1,11 +1,14 @@
 package kb
 
 import (
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -20,6 +23,14 @@ const (
 	StatusDownloadInprogress = 0x8
 	// StatusDownloadComplete : ダウンロード完了
 	StatusDownloadComplete = 0x10
+	// StatusUploadInprogress ファイルのアップロード中
+	StatusUploadInprogress = 0x20
+	// StatusUploadComplete ファイルのアップロード完了
+	StatusUploadComplete = 0x40
+	// StatusDownloadSkip ダウンロードのスキップ
+	StatusDownloadSkip = 0x80
+	// StatusError エラー
+	StatusError = 0x100
 )
 
 type Session struct {
@@ -34,7 +45,7 @@ type Session struct {
 
 func (session *Session) changeStatus(toStatus int) {
 
-	log.Printf("Change status: id=[%s], kbno=[%d], from-status=[%d], to-status=[%d]", session.ID.String, session.Kbno, session.Status, toStatus)
+	log.Printf("Change session status: id=[%s], kbno=[%d], from-status=[%d], to-status=[%d]", session.ID.String, session.Kbno, session.Status, toStatus)
 	_, err := session.Db.Exec(
 		"UPDATE session SET status = ?, update_utc_date=? WHERE id = ? AND kbno = ?",
 		toStatus, time.Now(), session.ID, session.Kbno,
@@ -42,8 +53,25 @@ func (session *Session) changeStatus(toStatus int) {
 	if err != nil {
 		log.Printf(err.Error())
 	}
-	log.Printf("Change status complete: id=[%s], kbno=[%d], from-status=[%d], to-status=[%d]", session.ID.String, session.Kbno, session.Status, toStatus)
 	session.Status = toStatus
+	log.Printf("Change session status complete: id=[%s], kbno=[%d]",
+		session.ID.String, session.Kbno)
+
+}
+
+func (packageInfo *PackageInfo) changeStatusPackageInfo(session Session, toStatus int) {
+	log.Printf("Change packageInfo status: id=[%s], kbno=[%d], pkg-name=[%s], from-status=[%d], to-status=[%d]",
+		session.ID.String, session.Kbno, packageInfo.FileName, packageInfo.Status, toStatus)
+	_, err := session.Db.Exec(
+		"UPDATE package SET status = ?, update_utc_date=? WHERE session_id = ? AND title = ?",
+		toStatus, time.Now(), session.ID, packageInfo.Title,
+	)
+	if err != nil {
+		log.Printf(err.Error())
+	}
+	packageInfo.Status = toStatus
+	log.Printf("Change packageInfo status complete: id=[%s], kbno=[%d], pkg-name=[%s]",
+		session.ID.String, session.Kbno, packageInfo.FileName)
 
 }
 
@@ -67,9 +95,9 @@ func (session Session) ProcessSession() {
 			session.ID, session.Kbno, p.Title, p.DownloadLink, p.Architecture, p.FileName, p.Language, p.FileSize, time.Now(), time.Now(), StautsMetadataComplete,
 		)
 		if err != nil {
-			log.Printf("INSERT ERROR: id=[%s], kbno=[%d]", session.ID.String, session.Kbno)
-			// package のステータスをエラーに変更
+			log.Printf("INSERT ERROR: id=[%s], kbno=[%d]\n", session.ID.String, session.Kbno)
 		}
+		p.Status = StautsMetadataComplete
 	}
 
 	// ステータスをメタデータ取得完了に変更
@@ -82,25 +110,32 @@ func (session Session) ProcessSession() {
 	session.changeStatus(StatusDownloadInprogress)
 	// ファイルのダウンロード
 	for _, kbPackageInfo := range kbinfo.PackageInfos {
-		err := func() error {
-			// packageのステータス変更
+		// packageのステータス変更
+		kbPackageInfo.changeStatusPackageInfo(session, StatusDownloadInprogress)
+		// ディレクトリが存在しない場合はディレクトリを作成
+		if err := os.Mkdir(session.ID.String, 0777); err != nil {
+			log.Printf("Directory is already exists.: id=[%s], kbno=[%d], error=[%s]", session.ID.String, session.Kbno, err.Error())
+		}
 
-			// ディレクトリが存在しない場合はディレクトリを作成
+		filePath := filepath.Join(session.ID.String, kbPackageInfo.FileName)
+
+		err := func() error {
 
 			// ファイルの存在チェック
 			// ファイルが存在する場合は処理をスキップ(1つのKBで、複数OS分のパッケージがリストされている場合、ファイルが同一の場合がある)
-			if _, err := os.Stat(kbPackageInfo.FileName); err == nil {
-				log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
-				return err
+			if _, err := os.Stat(filePath); err == nil {
+				log.Printf("file is exists. skip.. : kb=[%d], fileName=[%s]", session.Kbno, filePath)
+				kbPackageInfo.changeStatusPackageInfo(session, StatusDownloadSkip)
+				return nil
 			}
 
-			log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
+			log.Printf("start download KB-Pkg : kb=[%d], fileName=[%s], filePath=[%s]", session.Kbno, kbPackageInfo.FileName, filePath)
 			resp, err := http.Get(kbPackageInfo.DownloadLink)
 			if err != nil {
 				return err
 			}
 			defer resp.Body.Close()
-			file, err := os.Create(kbPackageInfo.FileName)
+			file, err := os.Create(filePath)
 			if err != nil {
 				return err
 			}
@@ -108,23 +143,31 @@ func (session Session) ProcessSession() {
 
 			io.Copy(file, resp.Body)
 			log.Printf("end download KB-Pkg : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
+			// packageのステータス変更
+			kbPackageInfo.changeStatusPackageInfo(session, StatusDownloadComplete)
 
 			return nil
 		}()
 		if err != nil {
+			kbPackageInfo.Status = StatusError
 			log.Print(err)
+			continue
 		}
-		// SA にアップロード
-
 		// ハッシュの計算
-
+		hash, err := hashFileMd5(filePath)
+		if err != nil {
+			log.Printf("Hash couldn't get : kb=[%d], fileName=[%s]", session.Kbno, kbPackageInfo.FileName)
+			kbPackageInfo.Status = StatusError
+			continue
+		}
+		kbPackageInfo.MD5hash = hash
+		log.Printf("Culculated Hash : kb=[%d], fileName=[%s], hash=[%s]", session.Kbno, kbPackageInfo.FileName, kbPackageInfo.MD5hash)
 		// Storage Account へアップロード
 
 		// ハッシュの取得と比較
 
-		// ディレクトリの削除
-
 	}
+	// ディレクトリの削除
 
 	// ステータスをダウンロード完了に変更
 	session.changeStatus(StatusDownloadComplete)
@@ -132,4 +175,20 @@ func (session Session) ProcessSession() {
 	// 処理終了
 	log.Printf("End process session: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
 
+}
+
+func hashFileMd5(filePath string) (string, error) {
+	var returnMD5String string
+	file, err := os.Open(filePath)
+	if err != nil {
+		return returnMD5String, err
+	}
+	defer file.Close()
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return returnMD5String, err
+	}
+	hashInBytes := hash.Sum(nil)[:16]
+	returnMD5String = hex.EncodeToString(hashInBytes)
+	return returnMD5String, nil
 }

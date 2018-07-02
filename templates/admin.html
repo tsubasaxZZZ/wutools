@@ -31,6 +31,7 @@
                 <td>Filename</td>
                 <td>Filesize</td>
                 <td>DownloadLink</td>
+                <td>Status</td>
             </tr>
         </th>
         {%for p in kb.packages%}
@@ -40,6 +41,7 @@
             <td>{{p.fileName}}</td>
             <td>{{p.fileSize}}</td>
             <td>{{p.downloadLink}}</td>
+            <td>{{p.status}}</td>
         </tr>
         {%endif%}
         {%endfor%}
