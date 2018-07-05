@@ -5,25 +5,30 @@ import datetime
 db = SQLAlchemy()
 
 #STATUSREGISTERED : 登録済み(開始前)
-STATUS_REGISTERED = 0X1
+STATUS_REGISTERED = 0x1
 #STATUSMETADATAINPROGRESS : メタデータ取得中
-STATUS_METADATAINPROGRESS = 0X2
+STATUS_METADATAINPROGRESS = 0x2
 #STAUTSMETADATACOMPLETE : メタデータ取得完了
-STAUTS_METADATACOMPLETE = 0X4
+STAUTS_METADATACOMPLETE = 0x4
 #STATUSDOWNLOADINPROGRESS : ダウンロード中
-STATUS_DOWNLOADINPROGRESS = 0X8
+STATUS_DOWNLOADINPROGRESS = 0x8
 #STATUSDOWNLOADCOMPLETE : ダウンロード完了
-STATUS_DOWNLOADCOMPLETE = 0X10
+STATUS_DOWNLOADCOMPLETE = 0x10
+# STATUS_UPLOAD_INPROGRESS ファイルのアップロード中
+STATUS_UPLOAD_INPROGRESS = 0x20
+# STATUS_UPLOAD_COMPLETE ファイルのアップロード完了
+STATUS_UPLOAD_COMPLETE = 0x40
 # STATUS_DOWNLOADSKIP ダウンロードのスキップ
-STATUS_DOWNLOADSKIP = 0X80
+STATUS_DOWNLOADSKIP = 0x80
 # STATUS_ERROR エラー
-STATUS_ERROR = 0X100
+STATUS_ERROR = 0x100
 
 class Session(db.Model):
     __tablename__ = 'session'
     id = db.Column(db.String(36), primary_key=True)
     kbno = db.Column(db.Integer, nullable=False, primary_key=True)
     packages = db.relationship('Package', backref='session', lazy=True)
+    saname = db.Column(db.String(256))
     sakey = db.Column(db.String(256))
     create_utc_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     update_utc_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)

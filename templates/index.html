@@ -1,3 +1,4 @@
+
 {% extends 'layouts/master.html' %}
 {% block title %}{% endblock %}
 {% block body %}
@@ -11,9 +12,12 @@
     </div>
 </div>
 <div class="form-group">
-    <label for="sakey"><h4>Storage Account Key(Optional)*</h4></label>
+    <h3>Download your storage account(Optional)</h3>
+    <div class="small">If you want to get KB package file to your storage account, please input sa key.</div>
+    <label for="saname"><h4>Storage Account Name</h4></label>
+    <input type="saname" class="form-control" name="saname" id="saname" placeholder="xxxxxxxxxxxxx">
+    <label for="sakey"><h4>Storage Account Key</h4></label>
     <input type="sakey" class="form-control" name="sakey" id="sakey" placeholder="xxxxxxxxxxxxx">
-    *If you want to get KB package file to your storage account, please input sa key.
 </div>
 <button type="submit" class="btn btn-primary">Submit</button>
 <input type="hidden" name="csrf_token" value="{{ session['token']}}"/>

@@ -21,7 +21,7 @@
         <tr class="clickable"  data-toggle="collapse" data-target="#group-of-rows-{{kb.kbno}}" aria-expanded="false" aria-controls="group-of-rows-{{kb.kbno}}">
             <td>+{{kb.kbno}}</td>
             <td>{{kb.title}}</td>
-            <td>{{kb.status}}</td>
+            <td>{{kb.status | convert_status}}</td>
         </tr>
     </tbody>
     <tbody id="group-of-rows-{{kb.kbno}}" class="collapse">
@@ -30,7 +30,6 @@
                 <td>Title</td>
                 <td>Filename</td>
                 <td>Filesize</td>
-                <td>DownloadLink</td>
                 <td>Status</td>
             </tr>
         </th>
@@ -38,10 +37,9 @@
         {% if p.kbno == kb.kbno %}
         <tr>
             <td>{{p.title}}</td>
-            <td>{{p.fileName}}</td>
+            <td><a href="{{p.downloadLink}}">{{p.fileName}}</a></td>
             <td>{{p.fileSize}}</td>
-            <td>{{p.downloadLink}}</td>
-            <td>{{p.status}}</td>
+            <td>{{p.status | convert_status}}</td>
         </tr>
         {%endif%}
         {%endfor%}

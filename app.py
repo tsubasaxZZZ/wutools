@@ -36,7 +36,7 @@ def index():
                 kbnos = request.form['kbnos'].splitlines()
                 app.logger.debug("kbnos={}".format(kbnos))
                 for kbno in kbnos:
-                    db.session.add(Session(id=request.form['id'], kbno=int(kbno), sakey=request.form['sakey'], status=models.STATUS_REGISTERED))
+                    db.session.add(Session(id=request.form['id'], kbno=int(kbno), sakey=request.form['sakey'], saname=request.form['saname'] ,status=models.STATUS_REGISTERED))
                 db.session.commit()
                 app.logger.debug("create end")
                 del session['token']
@@ -78,6 +78,21 @@ def export(uuid):
     res.headers['Content-Type'] = 'text/csv'
     res.headers['Content-Disposition'] = 'attachment; filename='+ str(uuid) +'.csv'
     return res
+
+@app.template_filter()
+def convert_status(s):
+    status = {
+        models.STATUS_REGISTERED:"Registered",
+        models.STATUS_METADATAINPROGRESS : "Metadata downloading",
+        models.STAUTS_METADATACOMPLETE : "Metadata downloaded",
+        models.STATUS_DOWNLOADINPROGRESS : "Package file downloading",
+        models.STATUS_DOWNLOADCOMPLETE : "Package file downloaded",
+        models.STATUS_UPLOAD_INPROGRESS : "Package file uploading",
+        models.STATUS_UPLOAD_COMPLETE : "Package file uploaded",
+        models.STATUS_DOWNLOADSKIP : "Skip",
+        models.STATUS_ERROR : "ERROR",
+    }
+    return status[int(s)]
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8081, debug=True)

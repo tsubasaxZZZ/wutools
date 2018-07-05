@@ -1,15 +1,20 @@
 package kb
 
 import (
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Azure/azure-storage-blob-go/2017-07-29/azblob"
 )
 
 const (
@@ -37,6 +42,7 @@ type Session struct {
 	ID         sql.NullString
 	Kbno       int
 	Sakey      sql.NullString
+	Saname     sql.NullString
 	CreateDate time.Time
 	UpdateDate time.Time
 	Status     int
@@ -78,7 +84,7 @@ func (packageInfo *PackageInfo) changeStatusPackageInfo(session Session, toStatu
 func (session Session) ProcessSession() {
 
 	// 処理開始
-	log.Printf("Start process session: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
+	log.Printf("Start ProcessSession: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
 
 	// ステータスをメタデータ取得中に変更
 	session.changeStatus(StatusMetadataInprogress)
@@ -97,7 +103,7 @@ func (session Session) ProcessSession() {
 		if err != nil {
 			log.Printf("INSERT ERROR: id=[%s], kbno=[%d]\n", session.ID.String, session.Kbno)
 		}
-		p.Status = StautsMetadataComplete
+		p.changeStatusPackageInfo(session, StautsMetadataComplete)
 	}
 
 	// ステータスをメタデータ取得完了に変更
@@ -106,6 +112,10 @@ func (session Session) ProcessSession() {
 	//----------------------------
 	// SAキーがある場合ダウンロード
 	//----------------------------
+
+	if session.Saname.String == "" || session.Sakey.String == "" {
+		return
+	}
 	// ステータスをダウンロード中に変更
 	session.changeStatus(StatusDownloadInprogress)
 	// ファイルのダウンロード
@@ -162,18 +172,53 @@ func (session Session) ProcessSession() {
 		}
 		kbPackageInfo.MD5hash = hash
 		log.Printf("Culculated Hash : kb=[%d], fileName=[%s], hash=[%s]", session.Kbno, kbPackageInfo.FileName, kbPackageInfo.MD5hash)
-		// Storage Account へアップロード
-
-		// ハッシュの取得と比較
 
 	}
-	// ディレクトリの削除
-
 	// ステータスをダウンロード完了に変更
 	session.changeStatus(StatusDownloadComplete)
 
+	// -----------------------------------
+	// Storage Account へアップロード
+	// -----------------------------------
+	// ステータスをアップロード中に変更
+	session.changeStatus(StatusUploadInprogress)
+
+	//コンテナの作成
+	credential := azblob.NewSharedKeyCredential(session.Saname.String, session.Sakey.String)
+	p := azblob.NewPipeline(credential, azblob.PipelineOptions{})
+	//containerName := session.ID.String
+	containerName := "kbdownloader"
+	URL, _ := url.Parse(
+		fmt.Sprintf("https://%s.blob.core.windows.net/%s", session.Saname.String, containerName))
+	log.Printf("Start create a container: named %s\n", containerName)
+	containerURL := azblob.NewContainerURL(*URL, p)
+	ctx := context.Background() // This example uses a never-expiring context
+
+	if _, err := containerURL.Create(ctx, azblob.Metadata{}, azblob.PublicAccessNone); err != nil {
+		if err := handleErrors(&session, err); err != nil {
+			goto END
+		}
+	}
+
+	log.Printf("Complete create a container : named %s\n", containerName)
+	//test(session.ID.String)
+	for _, kbPackageInfo := range kbinfo.PackageInfos {
+		if kbPackageInfo.Status == StatusDownloadSkip {
+			log.Printf("Skip upload file.: filename=[%s]", kbPackageInfo.FileName)
+			continue
+		}
+		kbPackageInfo.changeStatusPackageInfo(session, StatusUploadInprogress)
+		uploadToStorageAccount(ctx, &session, kbPackageInfo)
+	}
+
+	// ディレクトリの削除
+
+	// ステータスをアップロード完了に変更
+	session.changeStatus(StatusUploadComplete)
+END:
+
 	// 処理終了
-	log.Printf("End process session: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
+	log.Printf("End ProcessSession: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
 
 }
 
@@ -191,4 +236,51 @@ func hashFileMd5(filePath string) (string, error) {
 	hashInBytes := hash.Sum(nil)[:16]
 	returnMD5String = hex.EncodeToString(hashInBytes)
 	return returnMD5String, nil
+}
+
+func handleErrors(session *Session, err error) error {
+	if err != nil {
+		if serr, ok := err.(azblob.StorageError); ok { // This error is a Service-specific
+			switch serr.ServiceCode() { // Compare serviceCode to ServiceCodeXxx constants
+			case azblob.ServiceCodeContainerAlreadyExists:
+				log.Println("Received 409. Container already exists")
+				return nil
+			default:
+				log.Println(serr.ServiceCode())
+			}
+		}
+		session.changeStatus(StatusError)
+		return err
+	}
+	return nil
+}
+
+func uploadToStorageAccount(ctx context.Context, session *Session, kbPackageInfo *PackageInfo) error {
+	file, err := os.Open(filepath.Join(session.ID.String, kbPackageInfo.FileName))
+	if err != nil {
+		handleErrors(session, err)
+		kbPackageInfo.changeStatusPackageInfo(*session, StatusError)
+		return err
+	}
+	u, _ := url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net/kbdownloader/%s", session.Saname.String, fmt.Sprintf("%s/%s", session.ID.String, kbPackageInfo.FileName)))
+	blockBlobURL := azblob.NewBlockBlobURL(*u, azblob.NewPipeline(azblob.NewSharedKeyCredential(session.Saname.String, session.Sakey.String), azblob.PipelineOptions{}))
+	log.Printf("Uploading the file with blob name: %s\n", kbPackageInfo.FileName)
+	_, berr := azblob.UploadFileToBlockBlob(ctx, file, blockBlobURL, azblob.UploadToBlockBlobOptions{
+		BlockSize: 4 * 1024 * 1024,
+
+		/*Progress: func(bytesTransferred int64) {
+			fmt.Printf("Uploaded %d of %d bytes.\n", bytesTransferred, kbPackageInfo.FileSize)
+		},*/
+		Parallelism: 1,
+	})
+	if berr != nil {
+		handleErrors(session, err)
+		kbPackageInfo.changeStatusPackageInfo(*session, StatusError)
+		return berr
+	}
+	// ハッシュの取得と比較
+
+	kbPackageInfo.changeStatusPackageInfo(*session, StatusUploadComplete)
+
+	return nil
 }

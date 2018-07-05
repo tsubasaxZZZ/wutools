@@ -93,7 +93,7 @@ func daemonize() {
 		// 登録済み状態のもののみ取得
 		log.Println("Query session table.")
 		rows, err := db.Query(
-			"SELECT id,kbno,sakey,create_utc_date,update_utc_date,status FROM session WHERE `status` & ? = 1",
+			"SELECT id,kbno,sakey, saname, create_utc_date,update_utc_date,status FROM session WHERE `status` & ? = 1",
 			kb.StatusRegistered,
 		)
 		if err != nil {
@@ -111,6 +111,7 @@ func daemonize() {
 				&(session.ID),
 				&(session.Kbno),
 				&(session.Sakey),
+				&(session.Saname),
 				&(session.CreateDate),
 				&(session.UpdateDate),
 				&(session.Status),
