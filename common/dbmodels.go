@@ -36,6 +36,8 @@ const (
 	StatusDownloadSkip = 0x80
 	// StatusError エラー
 	StatusError = 0x100
+	// StatusCleanupComplete クリーンアップの完了
+	StatusCleanupComplete = 0x200
 )
 
 type Session struct {
@@ -49,7 +51,7 @@ type Session struct {
 	Db         *sql.DB
 }
 
-func (session *Session) changeStatus(toStatus int) {
+func (session *Session) ChangeStatus(toStatus int) {
 
 	log.Printf("Change session status: id=[%s], kbno=[%d], from-status=[%d], to-status=[%d]", session.ID.String, session.Kbno, session.Status, toStatus)
 	_, err := session.Db.Exec(
@@ -87,7 +89,7 @@ func (session Session) ProcessSession() {
 	log.Printf("Start ProcessSession: id=[%s], kbno=[%d], status=[%d]\n", session.ID.String, session.Kbno, session.Status)
 
 	// ステータスをメタデータ取得中に変更
-	session.changeStatus(StatusMetadataInprogress)
+	session.ChangeStatus(StatusMetadataInprogress)
 
 	// KB 情報の取得
 	kbinfo := BuildKBInfo(session.Kbno)
@@ -107,7 +109,7 @@ func (session Session) ProcessSession() {
 	}
 
 	// ステータスをメタデータ取得完了に変更
-	session.changeStatus(StautsMetadataComplete)
+	session.ChangeStatus(StautsMetadataComplete)
 
 	//----------------------------
 	// SAキーがある場合ダウンロード
@@ -117,7 +119,7 @@ func (session Session) ProcessSession() {
 		return
 	}
 	// ステータスをダウンロード中に変更
-	session.changeStatus(StatusDownloadInprogress)
+	session.ChangeStatus(StatusDownloadInprogress)
 	// ファイルのダウンロード
 	for _, kbPackageInfo := range kbinfo.PackageInfos {
 		// packageのステータス変更
@@ -175,13 +177,13 @@ func (session Session) ProcessSession() {
 
 	}
 	// ステータスをダウンロード完了に変更
-	session.changeStatus(StatusDownloadComplete)
+	session.ChangeStatus(StatusDownloadComplete)
 
 	// -----------------------------------
 	// Storage Account へアップロード
 	// -----------------------------------
 	// ステータスをアップロード中に変更
-	session.changeStatus(StatusUploadInprogress)
+	session.ChangeStatus(StatusUploadInprogress)
 
 	//コンテナの作成
 	credential := azblob.NewSharedKeyCredential(session.Saname.String, session.Sakey.String)
@@ -214,7 +216,7 @@ func (session Session) ProcessSession() {
 	// ディレクトリの削除
 
 	// ステータスをアップロード完了に変更
-	session.changeStatus(StatusUploadComplete)
+	session.ChangeStatus(StatusUploadComplete)
 END:
 
 	// 処理終了
@@ -249,7 +251,7 @@ func handleErrors(session *Session, err error) error {
 				log.Println(serr.ServiceCode())
 			}
 		}
-		session.changeStatus(StatusError)
+		session.ChangeStatus(StatusError)
 		return err
 	}
 	return nil
@@ -262,6 +264,7 @@ func uploadToStorageAccount(ctx context.Context, session *Session, kbPackageInfo
 		kbPackageInfo.changeStatusPackageInfo(*session, StatusError)
 		return err
 	}
+	defer file.Close()
 	u, _ := url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net/kbdownloader/%s", session.Saname.String, fmt.Sprintf("%s/%s", session.ID.String, kbPackageInfo.FileName)))
 	blockBlobURL := azblob.NewBlockBlobURL(*u, azblob.NewPipeline(azblob.NewSharedKeyCredential(session.Saname.String, session.Sakey.String), azblob.PipelineOptions{}))
 	log.Printf("Uploading the file with blob name: %s\n", kbPackageInfo.FileName)

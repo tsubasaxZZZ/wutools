@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ var (
 	metaonlyOpt = flag.Bool("metadata-only", false, "If you want to get only metadata, specific this option")
 	conOpt      = flag.Int("c", 10, "Specific max downloadconcurrent num(default:10)")
 	daemonOpt   = flag.Bool("d", false, "Daemon mode")
+	db          *sql.DB
 )
 
 func main() {
@@ -61,11 +63,12 @@ func main() {
 	}
 }
 
-func connectDB() (*sql.DB, error) {
+func connectDB() error {
 	// 設定ファイル読み込み
 	cfg, err := ini.Load("config.ini")
 	if err != nil {
 		log.Fatalf("Fail to read file: %v", err)
+		return err
 	}
 	//user:password@tcp(host:port)/dbname
 	connectionString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
@@ -77,16 +80,17 @@ func connectDB() (*sql.DB, error) {
 	)
 	// DB 接続
 	log.Printf("Connect mysql: %s", connectionString)
-	db, err := sql.Open("mysql", connectionString)
-	return db, err
+	db, err = sql.Open("mysql", connectionString)
+	return err
 
 }
 func daemonize() {
-	db, err := connectDB()
+	err := connectDB()
 	if err != nil {
 		panic(err.Error())
 	}
 	defer db.Close()
+
 	//無限ループ
 	for {
 		// session テーブルのクエリ
@@ -133,6 +137,66 @@ func daemonize() {
 			<-semaphore
 		}
 
+		cleanup()
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func cleanup() {
+	rows, err := db.Query(
+		"SELECT id,kbno,sakey, saname, create_utc_date,update_utc_date,status FROM session WHERE `status` & ? != ?",
+		kb.StatusCleanupComplete, kb.StatusCleanupComplete,
+	)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer rows.Close()
+
+	// 行スキャン
+	sessions := make(map[string][]kb.Session)
+	for rows.Next() {
+		var session kb.Session
+		session.Db = db
+		err := rows.Scan(
+			&(session.ID),
+			&(session.Kbno),
+			&(session.Sakey),
+			&(session.Saname),
+			&(session.CreateDate),
+			&(session.UpdateDate),
+			&(session.Status),
+		)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		sessions[session.ID.String] = append(sessions[session.ID.String], session)
+	}
+	log.Printf("Start scan rows for cleanup.: cleanup session count=[%d]", len(sessions))
+	if err := rows.Err(); err != nil {
+		log.Panic(err.Error())
+	}
+
+	for id, sessionList := range sessions {
+		canCleanup := true
+		// 全てのパッケージがアップロード完了していたら削除可能
+		for _, session := range sessionList {
+			log.Printf("Session status check.: id=[%s], status=[%d]", id, session.Status)
+			if session.Status != kb.StatusUploadComplete {
+				canCleanup = false
+			}
+		}
+		if canCleanup {
+			log.Printf("Start cleanup: id=[%s]", id)
+			err := os.RemoveAll(id)
+			if err != nil {
+				log.Printf("Cleanup error: id=[%s], error=[%v]", id, err.Error())
+				continue
+			}
+			for _, session := range sessionList {
+				session.ChangeStatus(kb.StatusCleanupComplete)
+			}
+			log.Printf("End cleanup: id=[%s]", id)
+		}
+	}
+
 }

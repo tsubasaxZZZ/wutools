@@ -22,6 +22,8 @@ STATUS_UPLOAD_COMPLETE = 0x40
 STATUS_DOWNLOADSKIP = 0x80
 # STATUS_ERROR エラー
 STATUS_ERROR = 0x100
+# STATUS_CLEANUP_COMPLETE クリーンアップの完了
+STATUS_CLEANUP_COMPLETE = 0x200
 
 class Session(db.Model):
     __tablename__ = 'session'

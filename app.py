@@ -91,6 +91,7 @@ def convert_status(s):
         models.STATUS_UPLOAD_COMPLETE : "Package file uploaded",
         models.STATUS_DOWNLOADSKIP : "Skip",
         models.STATUS_ERROR : "ERROR",
+        models.STATUS_CLEANUP_COMPLETE : "Package file uploaded",
     }
     return status[int(s)]
 
