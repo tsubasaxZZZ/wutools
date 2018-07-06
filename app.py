@@ -27,23 +27,23 @@ def index():
     elif request.method == 'POST':
         # トークンのチェック。トークンがフォームから送信されているものとセッションに保持しているものと違う場合はトップ画面へリダイレクト
         if 'token' not in session or session['token'] is None or request.form['csrf_token'] != session['token']:
-            app.logger.debug("token not match: csrf_token={}".format(request.form['csrf_token']))
+            app.logger.info("token not match: csrf_token={}".format(request.form['csrf_token']))
             return redirect(url_for('index'))
         else:
             try:
-                app.logger.debug("create start: id={}, token={}, csrf_token={}".format(request.form['id'], session['token'], request.form['csrf_token']))
+                app.logger.info("create start: id={}, token={}, csrf_token={}".format(request.form['id'], session['token'], request.form['csrf_token']))
                 # textareaのKB番号
                 kbnos = request.form['kbnos'].splitlines()
-                app.logger.debug("kbnos={}".format(kbnos))
+                app.logger.info("kbnos={}".format(kbnos))
                 for kbno in kbnos:
                     db.session.add(Session(id=request.form['id'], kbno=int(kbno), sakey=request.form['sakey'], saname=request.form['saname'] ,status=models.STATUS_REGISTERED))
                 db.session.commit()
-                app.logger.debug("create end")
+                app.logger.info("create end")
                 del session['token']
             except Exception as e:
                 # 入力エラー
                 db.session.rollback()
-                app.logger.debug(e)
+                app.logger.info(e)
                 return render_template('index.html', id=request.form['id'], kbnos=request.form['kbnos'], valid="is-invalid", error=str(e))
             finally:
                 db.session.close()
@@ -56,14 +56,14 @@ def index():
 @app.route("/<uuid:uuid>")
 def admin(uuid):
     session = db.session.query(Session).filter(Session.id == str(uuid)).all()
-    app.logger.debug("Get all session: sessions={}".format(session))
+    app.logger.info("Get all session: sessions={}".format(session))
     return render_template('admin.html', session=session, id=uuid)
 
 # CSV のエクスポート
 @app.route("/<uuid:uuid>/export")
 def export(uuid):
     packages = db.session.query(Package).filter(Package.session_id == str(uuid)).all()
-    app.logger.debug("Get all session: sessions={}".format(session))
+    app.logger.info("Get all session: sessions={}".format(session))
 
     f = StringIO()
     writer = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL, lineterminator="\n")
