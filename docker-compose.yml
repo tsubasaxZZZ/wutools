@@ -1,0 +1,28 @@
+version: '3'
+services:
+  mysql:
+    image: mysql
+    ports:
+     - "3306"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./kbdownloader.sql:/docker-entrypoint-initdb.d/kbdownloader.sql
+    environment:
+      - MYSQL_ROOT_PASSWORD=Password1
+    networks:
+     - kbdownloader
+    restart: always
+
+  kbdownloader:
+    image: tsubasaxzzz/wutools
+    #build: .
+    restart: always
+    depends_on:
+      - mysql
+    ports:
+      - '8090:8080'
+    networks:
+      - kbdownloader
+
+networks:
+  kbdownloader:
