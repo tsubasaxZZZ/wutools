@@ -1,0 +1,10 @@
+server {
+    listen       8080;
+    server_name  kd;
+    access_log   /var/log/nginx/kd.access.log;
+
+    location / {
+        include     uwsgi_params;
+        uwsgi_pass  unix:/var/run/uwsgi/kd.sock;
+    }
+}

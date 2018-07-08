@@ -13,6 +13,8 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 app = Flask(__name__)
 app.config.from_pyfile('config.ini')
+app.config['SQLALCHEMY_DATABASE_URI'] = "mysql://{}:{}@{}:{}/{}".format(app.config['DATABASE_USERNAME'], app.config['DATABASE_PASSWORD'], app.config['DATABASE_SERVER'], app.config['DATABASE_PORT'], app.config['DATABASE_NAME'])
+print(app.config['SQLALCHEMY_DATABASE_URI'])
 app.config['SECRET_KEY'] = os.urandom(24)
 db.init_app(app)
 db.app = app
